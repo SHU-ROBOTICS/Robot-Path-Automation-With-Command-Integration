@@ -59,7 +59,7 @@ class MainApp:
         self.start_button.grid(row=0, column=7, padx=5)
 
         # Add a button to export the path/commands to a C file
-        self.export_btn = tk.Button(self.input_frame, text="Export to C", command=self.export_to_c, state=tk.DISABLED)
+        self.export_btn = tk.Button(self.input_frame, text="Export Data", command=self.export_to_files, state=tk.DISABLED)
         self.export_btn.grid(row=0, column=8, padx=5)
 
         # Side selection buttons
@@ -113,13 +113,13 @@ class MainApp:
             self.field_canvas.selected_side = self.side_var.get()
             self.field_canvas.update_side_restriction()
 
-    def export_to_c(self):
+    def export_to_files(self):
         """Export the path and commands to a C file."""
         if not self.field_canvas:
             messagebox.showerror("Error", "Field is not initialized.")
             return
         
-        self.field_canvas.export_to_c()
+        self.field_canvas.export_to_files()
 
 
 class FieldCanvas:
@@ -438,13 +438,17 @@ class FieldCanvas:
         dy = p2[1] - p1[1]
         return math.degrees(math.atan2(dy, dx))
 
-    def export_to_c(self, filename="autonomous_commands.c"):
-        """Export the path and commands to a C file."""
-        with open(filename, "w") as f:
-            # Write the header for the C file
+    import math
+
+    def export_to_files(self, c_filename="autonomous_commands.cpp", txt_filename="autonomous_commands.txt"):
+        """Export the path and commands to both a C and a TXT file."""
+        
+        # Export to C file
+        with open(c_filename, "w") as f:
+            # Write header for C file
             f.write('#include <stddef.h>\n\n')
 
-            # Write enum for command types
+            # Enum and struct definitions
             f.write('typedef enum {\n')
             f.write('    CMD_MOVE_WITH_HEADING,\n')
             f.write('    CMD_PICK_UP,\n')
@@ -454,7 +458,6 @@ class FieldCanvas:
             f.write('    CMD_CLASP\n')
             f.write('} CommandType;\n\n')
 
-            # Write structure for commands
             f.write('typedef struct {\n')
             f.write('    CommandType command;\n')
             f.write('    float x;\n')
@@ -463,51 +466,81 @@ class FieldCanvas:
             f.write('    float speed;\n')
             f.write('} Command;\n\n')
 
-            # Define the array of commands
+            # Define the command array
             f.write('Command autonomous_commands[] = {\n')
 
-            # Iterate over path points and insert intermediate points and commands
+            # Write commands to C file
             for i in range(len(self.path_points) - 1):
                 p1 = self.path_points[i]
                 p2 = self.path_points[i + 1]
                 command = self.waypoint_commands[p1]
 
                 # Calculate heading
-                heading = math.degrees(math.atan2(p2[1] - p1[1], p2[0] - p1[0]))
+                heading = self.calculate_heading(p1, p2)
 
-                # Handle Bezier curve or straight line
+                # Generate intermediate points
                 if i < len(self.path_points) - 1 and self.dragging_curve:
-                    # Use control point for curve
-                    control = self.calculate_bezier_control_point(p1, p2)  # Assume you have control point calculation logic
+                    control = self.calculate_bezier_control_point(p1, p2)
                     intermediate_points = self.generate_intermediate_points(p1, p2, control)
                 else:
-                    # Straight line
                     intermediate_points = self.generate_intermediate_points(p1, p2)
 
-                # Add the current point command
+                # Write command at p1 to file
                 if command != 'None':
-                    f.write(f'    {{ CMD_{command.upper().replace(" ", "_")}, {p1[0]}, {p1[1]}, {heading}, 0 }},\n')
+                    f.write(f'    {{ CMD_{command.upper().replace(" ", "_")}, {p1[0]}, {p1[1]}, {heading:.2f}, 0 }},\n')
 
-                # Add intermediate points with move commands
+                # Write intermediate points with move commands
                 for point in intermediate_points:
                     distance = self.calculate_distance(p1, point)
                     speed = self.calculate_dynamic_speed(distance)
-                    f.write(f'    {{ CMD_MOVE_WITH_HEADING, {point[0]}, {point[1]}, {heading}, {speed} }},\n')
+                    f.write(f'    {{ CMD_MOVE_WITH_HEADING, {point[0]}, {point[1]}, {heading:.2f}, {speed:.2f} }},\n')
 
-            # Add the last point's command
+            # Add the last point’s command
             final_point = self.path_points[-1]
             final_command = self.waypoint_commands[final_point]
             if final_command != 'None':
-                f.write(f'    {{ CMD_{final_command.upper().replace(" ", "_")}, {final_point[0]}, {final_point[1]}, {heading}, 0 }},\n')
+                f.write(f'    {{ CMD_{final_command.upper().replace(" ", "_")}, {final_point[0]}, {final_point[1]}, {heading:.2f}, 0 }},\n')
 
-            # End the array
+            # End array and write size calculation
             f.write('};\n')
-
-            # Add the num_autonomous_commands definition here
             f.write(f'const size_t num_autonomous_commands = sizeof(autonomous_commands) / sizeof(autonomous_commands[0]);\n')
 
-        print(f"Path exported to {filename}")
+        print(f"C file exported to {c_filename}")
 
+        # Export to TXT file
+        with open(txt_filename, "w") as txt_file:
+            for i in range(len(self.path_points) - 1):
+                p1 = self.path_points[i]
+                p2 = self.path_points[i + 1]
+                command = self.waypoint_commands[p1]
+
+                # Calculate heading
+                heading = self.calculate_heading(p1, p2)
+
+                # Generate intermediate points
+                if i < len(self.path_points) - 1 and self.dragging_curve:
+                    control = self.calculate_bezier_control_point(p1, p2)
+                    intermediate_points = self.generate_intermediate_points(p1, p2, control)
+                else:
+                    intermediate_points = self.generate_intermediate_points(p1, p2)
+
+                # Write command and point data to TXT file
+                if command != 'None':
+                    txt_file.write(f'{command.upper()} at ({p1[0]:.2f}, {p1[1]:.2f}) with heading {heading:.2f}\n')
+
+                # Write intermediate points as move commands
+                for point in intermediate_points:
+                    distance = self.calculate_distance(p1, point)
+                    speed = self.calculate_dynamic_speed(distance)
+                    txt_file.write(f'MOVE to ({point[0]:.2f}, {point[1]:.2f}) at heading {heading:.2f} and speed {speed:.2f}\n')
+
+            # Write final command if present
+            final_point = self.path_points[-1]
+            final_command = self.waypoint_commands[final_point]
+            if final_command != 'None':
+                txt_file.write(f'{final_command.upper()} at ({final_point[0]:.2f}, {final_point[1]:.2f}) with heading {heading:.2f}\n')
+
+        print(f"TXT file exported to {txt_filename}")
 
 # Main application loop
 if __name__ == "__main__":
